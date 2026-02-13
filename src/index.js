@@ -1,6 +1,6 @@
 import express from 'express';
-import { ANIME } from '@consumet/extensions';
 import { mapAnilistToAnimePahe, mapAnilistToHiAnime, mapAnilistToAnimeKai } from './mappers/index.js';
+import { AnimePahe } from './providers/animepahe.js';
 import { AniList } from './providers/anilist.js';
 import { AnimeKai } from './providers/animekai.js';
 import { getEpisodeServers, getEpisodeSources } from './providers/hianime-servers.js';
@@ -34,11 +34,11 @@ app.get('/', (req, res) => {
 app.get('/animepahe/map/:anilistId', cache('5 minutes'), async (req, res) => {
   try {
     const { anilistId } = req.params;
-    
+
     if (!anilistId) {
       return res.status(400).json({ error: 'AniList ID is required' });
     }
-    
+
     const mappingResult = await mapAnilistToAnimePahe(anilistId);
     return res.json(mappingResult);
   } catch (error) {
@@ -51,11 +51,11 @@ app.get('/animepahe/map/:anilistId', cache('5 minutes'), async (req, res) => {
 app.get('/hianime/:anilistId', cache('5 minutes'), async (req, res) => {
   try {
     const { anilistId } = req.params;
-    
+
     if (!anilistId) {
       return res.status(400).json({ error: 'AniList ID is required' });
     }
-    
+
     const episodes = await mapAnilistToHiAnime(anilistId);
     return res.json(episodes);
   } catch (error) {
@@ -69,14 +69,14 @@ app.get('/hianime/servers/:animeId', cache('15 minutes'), async (req, res) => {
   try {
     const { animeId } = req.params;
     const { ep } = req.query;
-    
+
     if (!animeId) {
       return res.status(400).json({ error: 'Anime ID is required' });
     }
-    
+
     // Combine animeId and ep to form the expected episodeId format
     const episodeId = ep ? `${animeId}?ep=${ep}` : animeId;
-    
+
     const servers = await getEpisodeServers(episodeId);
     return res.json(servers);
   } catch (error) {
@@ -90,26 +90,26 @@ app.get('/hianime/sources/:animeId', cache('15 minutes'), async (req, res) => {
   try {
     const { animeId } = req.params;
     const { ep, server = 'vidstreaming', category = 'sub' } = req.query;
-    
+
     if (!animeId || !ep) {
       return res.status(400).json({ error: 'Both anime ID and episode number (ep) are required' });
     }
-    
+
     // Combine animeId and ep to form the expected episodeId format
     const episodeId = `${animeId}?ep=${ep}`;
-    
+
     // Use our local extractor which supports MegaCloud
     const sources = await getEpisodeSources(episodeId, server, category);
-    
+
     return res.json({
       success: true,
       data: sources
     });
   } catch (error) {
     console.error('HiAnime sources error:', error.message);
-    return res.status(500).json({ 
-      success: false, 
-      error: error.message 
+    return res.status(500).json({
+      success: false,
+      error: error.message
     });
   }
 });
@@ -118,11 +118,11 @@ app.get('/hianime/sources/:animeId', cache('15 minutes'), async (req, res) => {
 app.get('/animekai/map/:anilistId', cache('5 minutes'), async (req, res) => {
   try {
     const { anilistId } = req.params;
-    
+
     if (!anilistId) {
       return res.status(400).json({ error: 'AniList ID is required' });
     }
-    
+
     const mappingResult = await mapAnilistToAnimeKai(anilistId);
     return res.json(mappingResult);
   } catch (error) {
@@ -136,11 +136,11 @@ app.get('/animekai/sources/:episodeId', cache('15 minutes'), async (req, res) =>
   try {
     const { episodeId } = req.params;
     const { server, dub } = req.query;
-    
+
     if (!episodeId) {
       return res.status(400).json({ error: 'Episode ID is required' });
     }
-    
+
     const animeKai = new AnimeKai();
     const isDub = dub === 'true' || dub === '1';
     const sources = await animeKai.fetchEpisodeSources(episodeId, server, isDub);
@@ -156,20 +156,20 @@ app.get('/animepahe/sources/:session/:episodeId', cache('15 minutes'), async (re
   try {
     const { session, episodeId } = req.params;
     const fullEpisodeId = `${session}/${episodeId}`;
-    
+
     // Initialize a new AnimePahe instance each time
-    const consumetAnimePahe = new ANIME.AnimePahe();
-    
+    const animePahe = new AnimePahe();
+
     // Directly fetch and return the sources without modification
-    const sources = await consumetAnimePahe.fetchEpisodeSources(fullEpisodeId);
-    
+    const sources = await animePahe.fetchEpisodeSources(fullEpisodeId);
+
     // Simply return the sources directly as provided by Consumet
     return res.status(200).json(sources);
   } catch (error) {
     console.error('Error fetching episode sources:', error.message);
-    
+
     // Keep error handling simple
-    return res.status(500).json({ 
+    return res.status(500).json({
       error: error.message,
       message: 'Failed to fetch episode sources. If you receive a 403 error when accessing streaming URLs, add a Referer: "https://kwik.cx/" header to your requests.'
     });
@@ -180,24 +180,24 @@ app.get('/animepahe/sources/:session/:episodeId', cache('15 minutes'), async (re
 app.get('/animepahe/sources/:id', cache('15 minutes'), async (req, res) => {
   try {
     const episodeId = req.params.id;
-    
+
     if (!episodeId) {
       return res.status(400).json({ error: 'Episode ID is required' });
     }
-    
+
     // Initialize a new AnimePahe instance each time
-    const consumetAnimePahe = new ANIME.AnimePahe();
-    
+    const animePahe = new AnimePahe();
+
     // Directly fetch and return the sources without modification
-    const sources = await consumetAnimePahe.fetchEpisodeSources(episodeId);
-    
+    const sources = await animePahe.fetchEpisodeSources(episodeId);
+
     // Simply return the sources directly as provided by Consumet
     return res.status(200).json(sources);
   } catch (error) {
     console.error('Error fetching episode sources:', error.message);
-    
+
     // Keep error handling simple
-    return res.status(500).json({ 
+    return res.status(500).json({
       error: error.message,
       message: 'Failed to fetch episode sources. If you receive a 403 error when accessing streaming URLs, add a Referer: "https://kwik.cx/" header to your requests.'
     });
@@ -208,18 +208,18 @@ app.get('/animepahe/sources/:id', cache('15 minutes'), async (req, res) => {
 app.get('/animepahe/hls/:anilistId/:episode', cache('15 minutes'), async (req, res) => {
   try {
     const { anilistId, episode } = req.params;
-    
+
     if (!anilistId || !episode) {
       return res.status(400).json({ error: 'Both AniList ID and episode number are required' });
     }
-    
+
     // First, get the mapping from Anilist to AnimePahe
     const mappingResult = await mapAnilistToAnimePahe(anilistId);
-    
+
     if (!mappingResult.animepahe || !mappingResult.animepahe.episodes || mappingResult.animepahe.episodes.length === 0) {
       return res.status(404).json({ error: 'No episodes found for this anime on AnimePahe' });
     }
-    
+
     // Try to find the episode with the exact number first (e.g., AnimePahe episode numbers)
     let targetEpisode = mappingResult.animepahe.episodes.find(
       ep => ep.number === parseInt(episode, 10)
@@ -237,11 +237,11 @@ app.get('/animepahe/hls/:anilistId/:episode', cache('15 minutes'), async (req, r
     if (!targetEpisode) {
       return res.status(404).json({ error: `Episode ${episode} not found on AnimePahe` });
     }
-    
+
     // Now fetch the sources for this episode
-    const consumetAnimePahe = new ANIME.AnimePahe();
-    const sources = await consumetAnimePahe.fetchEpisodeSources(targetEpisode.episodeId);
-    
+    const animePahe = new AnimePahe();
+    const sources = await animePahe.fetchEpisodeSources(targetEpisode.episodeId);
+
     // Return the sources directly
     return res.status(200).json({
       sources: sources,
@@ -249,7 +249,7 @@ app.get('/animepahe/hls/:anilistId/:episode', cache('15 minutes'), async (req, r
     });
   } catch (error) {
     console.error('Error fetching HLS sources:', error.message);
-    return res.status(500).json({ 
+    return res.status(500).json({
       error: error.message,
       message: 'Failed to fetch HLS sources. If you receive a 403 error when accessing streaming URLs, add a Referer: "https://kwik.cx/" header to your requests.'
     });

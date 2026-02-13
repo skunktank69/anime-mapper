@@ -1,9 +1,10 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
+import { extractKwik } from '../extractors/kwik.js';
 
 export class AnimePahe {
   constructor() {
-    this.baseUrl = "https://animepahe.ru";
+    this.baseUrl = "https://animepahe.si";
     this.sourceName = 'AnimePahe';
     this.isMulti = false;
   }
@@ -15,7 +16,7 @@ export class AnimePahe {
           'Cookie': "__ddg1_=;__ddg2_=;",
         }
       });
-      
+
       const jsonResult = response.data;
       const searchResults = [];
 
@@ -36,9 +37,9 @@ export class AnimePahe {
           score: item.score || 0,
           poster: item.poster,
           session: item.session,
-          episodes: { 
-            sub: item.episodes || null, 
-            dub: '??' 
+          episodes: {
+            sub: item.episodes || null,
+            dub: '??'
           }
         });
       }
@@ -54,16 +55,16 @@ export class AnimePahe {
     try {
       const title = url.split('-')[1];
       const id = url.split('-')[0];
-      
+
       const session = await this._getSession(title, id);
       const epUrl = `${this.baseUrl}/api?m=release&id=${session}&sort=episode_desc&page=1`;
-      
+
       const response = await axios.get(epUrl, {
         headers: {
           'Cookie': "__ddg1_=;__ddg2_=;",
         }
       });
-      
+
       return await this._recursiveFetchEpisodes(epUrl, JSON.stringify(response.data), session);
     } catch (error) {
       console.error('Error fetching episodes:', error.message);
@@ -102,38 +103,34 @@ export class AnimePahe {
             'Cookie': "__ddg1_=;__ddg2_=;",
           }
         });
-        
+
         const moreEpisodes = await this._recursiveFetchEpisodes(newUrl, JSON.stringify(newResponse.data), session);
         episodes = [...episodes, ...moreEpisodes.episodes];
         animeTitle = moreEpisodes.title;
         animeDetails = moreEpisodes.details || animeDetails;
       } else {
-        const detailUrl = `https://animepahe.ru/a/${jsonResult.data[0].anime_id}`;
+        const detailUrl = `https://animepahe.si/a/${jsonResult.data[0].anime_id}`;
         const newResponse = await axios.get(detailUrl, {
           headers: {
             'Cookie': "__ddg1_=;__ddg2_=;",
           }
         });
-        
+
         if (newResponse.status === 200) {
           const $ = cheerio.load(newResponse.data);
           animeTitle = $('.title-wrapper span').text().trim() || 'Could not fetch title';
-          
-          // Try to extract additional information
+
           try {
-            // Parse type
             const typeText = $('.col-sm-4.anime-info p:contains("Type")').text();
             if (typeText) {
               animeDetails.type = typeText.replace('Type:', '').trim();
             }
-            
-            // Parse status
+
             const statusText = $('.col-sm-4.anime-info p:contains("Status")').text();
             if (statusText) {
               animeDetails.status = statusText.replace('Status:', '').trim();
             }
-            
-            // Parse season and year
+
             const seasonText = $('.col-sm-4.anime-info p:contains("Season")').text();
             if (seasonText) {
               const seasonMatch = seasonText.match(/Season:\s+(\w+)\s+(\d{4})/);
@@ -142,8 +139,7 @@ export class AnimePahe {
                 animeDetails.year = parseInt(seasonMatch[2]);
               }
             }
-            
-            // Parse score
+
             const scoreText = $('.col-sm-4.anime-info p:contains("Score")').text();
             if (scoreText) {
               const scoreMatch = scoreText.match(/Score:\s+([\d.]+)/);
@@ -157,7 +153,6 @@ export class AnimePahe {
         }
       }
 
-      // Always sort episodes by number in ascending order, regardless of how the API returns them
       const sortedEpisodes = [...episodes].sort((a, b) => a.number - b.number);
 
       return {
@@ -165,7 +160,7 @@ export class AnimePahe {
         session: session,
         totalEpisodes: jsonResult.total,
         details: animeDetails,
-        episodes: sortedEpisodes, // Return sorted episodes, always in ascending order
+        episodes: sortedEpisodes,
       };
     } catch (error) {
       console.error('Error recursively fetching episodes:', error.message);
@@ -173,14 +168,18 @@ export class AnimePahe {
     }
   }
 
-  async scrapeEpisodesSrcs(episodeUrl, { category, lang } = {}) {
+  async fetchEpisodeSources(episodeId, options = {}) {
+    return this.scrapeEpisodesSrcs(episodeId, options);
+  }
+
+  async scrapeEpisodesSrcs(episodeId, { category, lang } = {}) {
     try {
-      const response = await axios.get(`${this.baseUrl}/play/${episodeUrl}`, {
+      const response = await axios.get(`${this.baseUrl}/play/${episodeId}`, {
         headers: {
           'Cookie': "__ddg1_=;__ddg2_=;",
         }
       });
-      
+
       const $ = cheerio.load(response.data);
       const buttons = $('#resolutionMenu > button');
       const videoLinks = [];
@@ -189,21 +188,27 @@ export class AnimePahe {
         const btn = buttons[i];
         const kwikLink = $(btn).attr('data-src');
         const quality = $(btn).text();
-        
-        // Instead of extracting, just return the link directly
-        videoLinks.push({
-          quality: quality,
-          url: kwikLink,
-          referer: "https://kwik.cx",
-        });
+
+        try {
+          const extraction = await extractKwik(kwikLink, response.config.url);
+          if (extraction && extraction.url) {
+            videoLinks.push({
+              quality: quality,
+              url: extraction.url,
+              isM3U8: extraction.isM3U8,
+            });
+          }
+        } catch (e) {
+          console.error(`Error extracting Kwik for ${quality}:`, e.message);
+        }
       }
 
-      const result = {
-        sources: videoLinks.length > 0 ? [{ url: videoLinks[0].url }] : [],
-        multiSrc: videoLinks,
+      return {
+        headers: {
+          Referer: "https://kwik.cx/"
+        },
+        sources: videoLinks
       };
-      
-      return result;
     } catch (error) {
       console.error('Error fetching episode sources:', error.message);
       throw new Error('Failed to fetch episode sources');
@@ -217,62 +222,55 @@ export class AnimePahe {
           'Cookie': "__ddg1_=;__ddg2_=;",
         }
       });
-      
+
       const resBody = response.data;
       if (!resBody.data || resBody.data.length === 0) {
         throw new Error(`No results found for title: ${title}`);
       }
-      
-      // First try: Direct ID match if provided and valid
+
       if (animeId) {
         const animeIdMatch = resBody.data.find(anime => String(anime.id) === String(animeId));
         if (animeIdMatch) {
           return animeIdMatch.session;
         }
       }
-      
-      // Second try: Normalize titles and find best match
+
       const normalizeTitle = t => t.toLowerCase().replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim();
       const normalizedSearchTitle = normalizeTitle(title);
-      
+
       let bestMatch = null;
       let highestSimilarity = 0;
-      
+
       for (const anime of resBody.data) {
         const normalizedAnimeTitle = normalizeTitle(anime.title);
-        // Calculate simple similarity (more sophisticated than exact match)
         let similarity = 0;
-        
-        // Exact match
+
         if (normalizedAnimeTitle === normalizedSearchTitle) {
           similarity = 1;
-        } 
-        // Contains match
-        else if (normalizedAnimeTitle.includes(normalizedSearchTitle) || 
-                normalizedSearchTitle.includes(normalizedAnimeTitle)) {
-          const lengthRatio = Math.min(normalizedAnimeTitle.length, normalizedSearchTitle.length) / 
-                             Math.max(normalizedAnimeTitle.length, normalizedSearchTitle.length);
+        }
+        else if (normalizedAnimeTitle.includes(normalizedSearchTitle) ||
+          normalizedSearchTitle.includes(normalizedAnimeTitle)) {
+          const lengthRatio = Math.min(normalizedAnimeTitle.length, normalizedSearchTitle.length) /
+            Math.max(normalizedAnimeTitle.length, normalizedSearchTitle.length);
           similarity = 0.8 * lengthRatio;
         }
-        // Word match
         else {
           const searchWords = normalizedSearchTitle.split(' ');
           const animeWords = normalizedAnimeTitle.split(' ');
           const commonWords = searchWords.filter(word => animeWords.includes(word));
           similarity = commonWords.length / Math.max(searchWords.length, animeWords.length);
         }
-        
+
         if (similarity > highestSimilarity) {
           highestSimilarity = similarity;
           bestMatch = anime;
         }
       }
-      
+
       if (bestMatch && highestSimilarity > 0.5) {
         return bestMatch.session;
       }
-      
-      // Default to first result if no good match found
+
       return resBody.data[0].session;
     } catch (error) {
       console.error('Error getting session:', error.message);
@@ -281,4 +279,4 @@ export class AnimePahe {
   }
 }
 
-export default AnimePahe; 
+export default AnimePahe;
